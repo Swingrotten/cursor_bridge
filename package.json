@@ -1,0 +1,24 @@
+{
+  "name": "cursor-bridge",
+  "version": "1.0.0",
+  "description": "OpenAI compatible API bridge for Cursor.com using browser automation",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "node test/test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "puppeteer": "^21.6.1",
+    "uuid": "^9.0.1",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "axios": "^1.6.2"
+  },
+  "keywords": ["openai", "cursor", "api", "bridge", "puppeteer"],
+  "author": "",
+  "license": "MIT"
+}
