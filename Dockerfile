@@ -35,11 +35,9 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Google Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
+# 安装 Chromium
+RUN apt-get update \
+    && apt-get install -y chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建应用目录
@@ -48,8 +46,12 @@ WORKDIR /app
 # 复制 package 文件
 COPY package*.json ./
 
-# 安装 Node.js 依赖
-RUN npm ci --only=production
+# 设置 Puppeteer 配置 (跳过下载，使用系统 Chrome)
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+# 安装 Node.js 依赖 (美国服务器使用官方源更快)
+RUN npm ci --omit=dev && \
+    npm cache clean --force
 
 # 复制应用代码
 COPY . .
@@ -64,13 +66,10 @@ RUN groupadd -r appuser && useradd -r -g appuser -G audio,video appuser \
 USER appuser
 
 # 暴露端口
-EXPOSE 8000
+EXPOSE 8200
 
-# 设置环境变量
-ENV AUTO_BROWSER=true
-ENV HEADLESS=true
-ENV DEBUG=true
-ENV PORT=8000
+# 设置 Puppeteer 环境变量
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # 启动命令
 CMD ["npm", "run", "start:docker"]

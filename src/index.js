@@ -155,8 +155,15 @@ app.get('/injection.js', (req, res) => {
       res.status(500).send('console.error("无法加载注入脚本");');
       return;
     }
+
+    // 动态替换端口号
+    const modifiedScript = data.replace(
+      'http://localhost:8000',
+      `http://localhost:${port}`
+    );
+
     res.setHeader('Content-Type', 'application/javascript');
-    res.send(data);
+    res.send(modifiedScript);
   });
 });
 
@@ -235,13 +242,19 @@ app.post('/bridge/event', (req, res) => {
       break;
 
     case 'done':
-      // 完成响应
+      // done 事件不再立即关闭流，只记录日志
       const { rid: doneRid } = data;
-      if (activeStreams.has(doneRid)) {
-        const streamRes = activeStreams.get(doneRid);
+      console.log(`📋 收到done事件，但继续保持流开启: ${doneRid}`);
+      break;
+
+    case 'usage':
+      // usage 事件表示响应真正完成，这时才关闭流
+      const { rid: usageRid } = data;
+      if (activeStreams.has(usageRid)) {
+        const streamRes = activeStreams.get(usageRid);
 
         // 找到对应的请求ID
-        let requestId = doneRid;
+        let requestId = usageRid;
         for (const [id, _] of pendingRequests) {
           if (activeStreams.get(id) === streamRes) {
             requestId = id;
@@ -264,20 +277,16 @@ app.post('/bridge/event', (req, res) => {
         }
 
         // 清理所有相关的映射
-        activeStreams.delete(doneRid);
-        if (requestId !== doneRid) {
+        activeStreams.delete(usageRid);
+        if (requestId !== usageRid) {
           activeStreams.delete(requestId);
           pendingRequests.delete(requestId);
         }
 
-        console.log(`✅ 完成响应: ${requestId} (Cursor RID: ${doneRid})`);
+        console.log(`✅ 完成响应: ${requestId} (Cursor RID: ${usageRid}) [usage事件触发]`);
       } else {
-        console.log(`⚠️ 没有找到活跃流，无法完成响应，RID: ${doneRid}`);
+        console.log(`⚠️ 没有找到活跃流，无法完成响应，RID: ${usageRid}`);
       }
-      break;
-
-    case 'usage':
-      // 使用统计 - 可以记录但不需要特殊处理
       break;
   }
 

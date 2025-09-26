@@ -11,7 +11,7 @@ class AutoBrowser {
       headless: options.headless || process.env.HEADLESS === 'true', // 支持环境变量控制
       debug: options.debug || process.env.DEBUG === 'true',
       port: options.port || process.env.PORT || 8000,
-      useEdge: options.useEdge !== false, // 默认尝试使用 Edge
+      browser: options.browser || process.env.BROWSER || 'auto', // 浏览器选择
       stealthMode: options.stealthMode !== false, // 默认启用隐身模式
       ...options
     };
@@ -23,20 +23,59 @@ class AutoBrowser {
     }
   }
 
-  findEdgePath() {
+  findBrowserPath() {
     const fs = require('fs');
     const path = require('path');
 
-    // Windows Edge 路径
-    const possiblePaths = [
-      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-      'C:\\Users\\' + process.env.USERNAME + '\\AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe'
-    ];
+    // 定义所有浏览器路径
+    const allBrowsers = {
+      edge: {
+        name: 'Microsoft Edge',
+        paths: [
+          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+          'C:\\Users\\' + process.env.USERNAME + '\\AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe'
+        ]
+      },
+      chrome: {
+        name: 'Google Chrome',
+        paths: [
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Users\\' + process.env.USERNAME + '\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'
+        ]
+      },
+      chromium: {
+        name: 'Chromium',
+        paths: [
+          'C:\\Program Files (x86)\\Chromium\\Application\\chrome.exe',
+          'C:\\Program Files\\Chromium\\Application\\chrome.exe',
+          'C:\\Users\\' + process.env.USERNAME + '\\AppData\\Local\\Chromium\\Application\\chrome.exe'
+        ]
+      }
+    };
 
-    for (const edgePath of possiblePaths) {
-      if (fs.existsSync(edgePath)) {
-        return edgePath;
+    const preferredBrowser = this.options.browser.toLowerCase();
+
+    // 如果指定了特定浏览器，优先查找该浏览器
+    if (preferredBrowser !== 'auto' && allBrowsers[preferredBrowser]) {
+      const browser = allBrowsers[preferredBrowser];
+      for (const browserPath of browser.paths) {
+        if (fs.existsSync(browserPath)) {
+          return { name: browser.name, path: browserPath };
+        }
+      }
+      this.log(`⚠️ 指定的浏览器 ${preferredBrowser} 未找到，回退到自动检测`);
+    }
+
+    // 自动检测模式：按优先级 Edge > Chrome > Chromium
+    const browserPriority = ['edge', 'chrome', 'chromium'];
+    for (const browserKey of browserPriority) {
+      const browser = allBrowsers[browserKey];
+      for (const browserPath of browser.paths) {
+        if (fs.existsSync(browserPath)) {
+          return { name: browser.name, path: browserPath };
+        }
       }
     }
 
@@ -58,8 +97,8 @@ class AutoBrowser {
   async launchBrowser() {
     this.log('启动浏览器...');
 
-    // 尝试使用 Edge 浏览器路径
-    const edgePath = this.findEdgePath();
+    // 查找可用的浏览器路径
+    const browserInfo = this.findBrowserPath();
 
     const launchOptions = {
       headless: this.options.headless ? "new" : false,
@@ -87,10 +126,10 @@ class AutoBrowser {
       launchOptions.args.push('--start-maximized');
     }
 
-    // 如果找到 Edge，使用 Edge
-    if (edgePath) {
-      launchOptions.executablePath = edgePath;
-      this.log(`使用 Microsoft Edge 浏览器 (${this.options.headless ? '无头模式' : '可视模式'}):`, edgePath);
+    // 如果找到浏览器，使用找到的浏览器
+    if (browserInfo) {
+      launchOptions.executablePath = browserInfo.path;
+      this.log(`使用 ${browserInfo.name} 浏览器 (${this.options.headless ? '无头模式' : '可视模式'}):`, browserInfo.path);
     } else {
       this.log(`使用默认 Chrome 浏览器 (${this.options.headless ? '无头模式' : '可视模式'})`);
     }
@@ -222,7 +261,13 @@ class AutoBrowser {
 
     // 读取注入脚本
     const injectionPath = path.join(__dirname, 'browser-injection.js');
-    const injectionScript = fs.readFileSync(injectionPath, 'utf8');
+    let injectionScript = fs.readFileSync(injectionPath, 'utf8');
+
+    // 动态替换端口号
+    injectionScript = injectionScript.replace(
+      'http://localhost:8000',
+      `http://localhost:${this.options.port}`
+    );
 
     try {
       // 执行注入

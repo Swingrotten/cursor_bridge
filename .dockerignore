@@ -55,3 +55,9 @@ coverage/
 Dockerfile
 docker-compose.yml
 .dockerignore
+
+# 大文件和不必要的文件
+cursor-chat-4.3.0.js.txt
+*.tar
+*.zip
+*.gz

@@ -137,15 +137,25 @@ npm run start:docker
 # HEADLESS=true
 # DEBUG=true
 
-# 2. 构建并启动
+# 2. 构建并启动 (首次构建需要5-10分钟，请耐心等待)
 docker-compose up -d
 
-# 3. 查看日志
+# 3. 查看构建和运行日志
 docker-compose logs -f cursor-bridge
 
 # 4. 停止服务
 docker-compose down
 ```
+
+### ⏱️ 构建时间说明
+
+Docker 首次构建需要：
+- 📦 **下载基础镜像**: ~1-2分钟
+- 🛠️ **安装系统依赖**: ~2-3分钟
+- 📦 **安装 Node.js 依赖**: ~3-5分钟
+- 🏗️ **总计时间**: 约5-10分钟 (取决于网络速度)
+
+**💡 提示**: 构建过程中如果卡在 npm 安装步骤，请耐心等待，这是正常现象。
 
 ### Docker 命令
 
