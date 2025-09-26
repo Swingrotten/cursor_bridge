@@ -4,6 +4,7 @@ FROM node:18-slim
 # 安装 Chrome/Chromium 所需的依赖
 RUN apt-get update && apt-get install -y \
     wget \
+    curl \
     gnupg \
     ca-certificates \
     procps \

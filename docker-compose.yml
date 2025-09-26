@@ -11,7 +11,7 @@ services:
       - DEBUG=true
       - PORT=8000
     volumes:
-      # 可选：持久化配置
+      # 可选：持久化日志
       - ./logs:/app/logs
     restart: unless-stopped
     # 共享内存大小，Chrome 需要
@@ -23,34 +23,13 @@ services:
     container_name: cursor-bridge
     # 健康检查
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # 可选：添加 nginx 反向代理
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - cursor-bridge
-    restart: unless-stopped
-    container_name: cursor-bridge-nginx
-    profiles:
-      - nginx
-
 # 网络配置
 networks:
   default:
     name: cursor-bridge-network
-
-# 持久化存储
-volumes:
-  logs:
-    driver: local

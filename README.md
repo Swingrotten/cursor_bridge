@@ -152,15 +152,16 @@ docker run -d \
 docker logs -f cursor-bridge
 ```
 
-### 带 Nginx 反向代理
+### 访问地址
 
 ```bash
-# 启动完整服务栈 (包含 nginx)
-docker-compose --profile nginx up -d
+# 直接访问 API
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-sonnet-4-20250514", "messages": [{"role": "user", "content": "Hello"}], "stream": true}'
 
-# 访问地址
-# HTTP: http://localhost
-# API: http://localhost/v1/chat/completions
+# 查看使用说明
+open http://localhost:8000
 ```
 
 ## 🏗️ 架构说明
