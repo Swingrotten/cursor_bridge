@@ -1,10 +1,25 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const AutoBrowser = require('./auto-browser');
 
 const app = express();
 const port = process.env.PORT || 8000;
+const autoMode = process.env.AUTO_BROWSER === 'true'; // 默认关闭自动模式，避免影响手动使用
+
+// 调试环境变量
+console.log('🔧 环境变量调试:');
+console.log(`   PORT: ${port}`);
+console.log(`   AUTO_BROWSER: ${process.env.AUTO_BROWSER}`);
+console.log(`   autoMode: ${autoMode}`);
+console.log(`   DEBUG: ${process.env.DEBUG}`);
+console.log('');
+
+// 自动浏览器实例
+let autoBrowser = null;
 
 // 存储活跃的SSE连接和请求
 const activeStreams = new Map();
@@ -37,11 +52,31 @@ app.get('/', (req, res) => {
     <p><strong>OpenAI兼容的Cursor.com API桥接服务</strong></p>
 
     <div class="important">
-        <h3>⚠️ 重要提醒</h3>
-        <p>这个服务需要在真实的浏览器环境中运行，不能绕过Cursor.com的验证机制。</p>
+        <h3>🤖 自动化模式</h3>
+        <p>服务器启动时会自动打开浏览器并尝试注入脚本。如果遇到验证，请在打开的浏览器窗口中完成验证。</p>
+        <p><strong>保持浏览器窗口打开！</strong>关闭浏览器会中断API服务。</p>
     </div>
 
-    <h2>📋 使用步骤</h2>
+    <h2>📋 使用步骤 (自动模式)</h2>
+
+    <div class="step">
+        <h3>步骤 1: 启动服务 (自动)</h3>
+        <p>运行 <code>npm start</code>，服务器将自动:</p>
+        <ul>
+            <li>启动 API 服务器</li>
+            <li>打开浏览器窗口</li>
+            <li>导航到 Cursor.com</li>
+            <li>自动注入桥接脚本</li>
+        </ul>
+    </div>
+
+    <div class="step">
+        <h3>步骤 2: 处理验证 (可能需要)</h3>
+        <p>如果遇到人机验证或登录要求，请在自动打开的浏览器窗口中完成。</p>
+        <p>验证完成后，脚本会自动继续注入过程。</p>
+    </div>
+
+    <h2>📋 手动模式 (备用)</h2>
 
     <div class="step">
         <h3>步骤 1: 打开 Cursor.com</h3>
@@ -394,13 +429,52 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`\n🚀 Cursor Bridge 启动成功!`);
   console.log(`📖 使用说明: http://localhost:${port}`);
   console.log(`🔗 API端点: http://localhost:${port}/v1/chat/completions`);
   console.log(`📋 模型列表: http://localhost:${port}/v1/models\n`);
-  console.log(`💡 使用步骤:`);
-  console.log(`   1. 访问 http://localhost:${port} 查看详细说明`);
-  console.log(`   2. 在浏览器中打开 cursor.com 并注入脚本`);
-  console.log(`   3. 使用标准 OpenAI API 格式调用\n`);
+
+  // 启动自动浏览器 (可通过环境变量控制)
+  if (autoMode) {
+    console.log(`🤖 正在启动自动浏览器...`);
+    try {
+      autoBrowser = new AutoBrowser({
+        port,
+        debug: true,
+        useEdge: true,
+        stealthMode: true
+      });
+      await autoBrowser.start();
+      console.log(`✅ 自动化设置完成！API服务已准备就绪。\n`);
+    } catch (error) {
+      console.log(`⚠️ 自动浏览器启动失败: ${error.message}`);
+      console.log(`💡 请手动完成以下步骤:`);
+      console.log(`   1. 访问 http://localhost:${port} 查看详细说明`);
+      console.log(`   2. 在浏览器中打开 cursor.com 并注入脚本`);
+      console.log(`   3. 使用标准 OpenAI API 格式调用\n`);
+    }
+  } else {
+    console.log(`📖 手动模式启动，请手动完成以下步骤:`);
+    console.log(`   1. 访问 http://localhost:${port} 查看详细说明`);
+    console.log(`   2. 在浏览器中打开 cursor.com 并注入脚本`);
+    console.log(`   3. 使用标准 OpenAI API 格式调用\n`);
+  }
+});
+
+// 优雅关闭
+process.on('SIGINT', async () => {
+  console.log('\n🔄 正在关闭服务...');
+  if (autoBrowser) {
+    await autoBrowser.close();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n🔄 正在关闭服务...');
+  if (autoBrowser) {
+    await autoBrowser.close();
+  }
+  process.exit(0);
 });

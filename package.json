@@ -5,20 +5,29 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:auto": "AUTO_BROWSER=true node src/index.js",
+    "start:manual": "AUTO_BROWSER=false node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "node test/test.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
     "express": "^4.18.2",
     "puppeteer": "^21.6.1",
-    "uuid": "^9.0.1",
-    "cors": "^2.8.5"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "axios": "^1.6.2"
+    "axios": "^1.6.2",
+    "nodemon": "^3.0.2"
   },
-  "keywords": ["openai", "cursor", "api", "bridge", "puppeteer"],
+  "keywords": [
+    "openai",
+    "cursor",
+    "api",
+    "bridge",
+    "puppeteer"
+  ],
   "author": "",
   "license": "MIT"
 }

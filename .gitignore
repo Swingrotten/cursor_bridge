@@ -1,0 +1,43 @@
+# 依赖文件
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 日志文件
+logs
+*.log
+
+# 临时文件
+tmp/
+temp/
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS文件
+.DS_Store
+Thumbs.db
+
+# 构建输出
+dist/
+build/
+
+# 覆盖率报告
+coverage/
+
+# 截图等临时文件
+*.jpg
+*.png
+*.gif
+*.bmp
