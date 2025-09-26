@@ -1,0 +1,57 @@
+# 依赖文件（会在容器中重新安装）
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 环境文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 开发文件
+.git
+.gitignore
+README.md
+.editorconfig
+.eslintrc
+.prettierrc
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS 文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+logs
+*.log
+
+# 临时文件和缓存
+tmp/
+temp/
+.cache/
+
+# 测试文件
+test/
+coverage/
+.nyc_output
+
+# 文档和媒体文件
+*.md
+*.txt
+*.jpg
+*.png
+*.gif
+*.bmp
+
+# Docker 文件（避免递归）
+Dockerfile
+docker-compose.yml
+.dockerignore

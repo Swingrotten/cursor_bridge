@@ -7,6 +7,8 @@
     "start": "node src/index.js",
     "start:auto": "AUTO_BROWSER=true node src/index.js",
     "start:manual": "AUTO_BROWSER=false node src/index.js",
+    "start:headless": "AUTO_BROWSER=true HEADLESS=true node src/index.js",
+    "start:docker": "AUTO_BROWSER=true HEADLESS=true DEBUG=true node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "node test/test.js"
   },

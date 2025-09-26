@@ -8,9 +8,9 @@ class AutoBrowser {
     this.page = null;
     this.isInjected = false;
     this.options = {
-      headless: false, // 保持可见，方便用户处理验证
-      debug: options.debug || true,
-      port: options.port || 8000,
+      headless: options.headless || process.env.HEADLESS === 'true', // 支持环境变量控制
+      debug: options.debug || process.env.DEBUG === 'true',
+      port: options.port || process.env.PORT || 8000,
       useEdge: options.useEdge !== false, // 默认尝试使用 Edge
       stealthMode: options.stealthMode !== false, // 默认启用隐身模式
       ...options
@@ -62,10 +62,9 @@ class AutoBrowser {
     const edgePath = this.findEdgePath();
 
     const launchOptions = {
-      headless: false, // 保持可见
-      defaultViewport: null, // 使用默认视窗
+      headless: this.options.headless ? "new" : false,
+      defaultViewport: this.options.headless ? { width: 1920, height: 1080 } : null,
       args: [
-        '--start-maximized',
         '--disable-blink-features=AutomationControlled',
         '--disable-features=VizDisplayCompositor',
         '--no-first-run',
@@ -83,12 +82,17 @@ class AutoBrowser {
       ]
     };
 
+    // 只在非无头模式下最大化窗口
+    if (!this.options.headless) {
+      launchOptions.args.push('--start-maximized');
+    }
+
     // 如果找到 Edge，使用 Edge
     if (edgePath) {
       launchOptions.executablePath = edgePath;
-      this.log('使用 Microsoft Edge 浏览器:', edgePath);
+      this.log(`使用 Microsoft Edge 浏览器 (${this.options.headless ? '无头模式' : '可视模式'}):`, edgePath);
     } else {
-      this.log('使用默认 Chrome 浏览器');
+      this.log(`使用默认 Chrome 浏览器 (${this.options.headless ? '无头模式' : '可视模式'})`);
     }
 
     this.browser = await puppeteer.launch(launchOptions);
@@ -205,6 +209,9 @@ class AutoBrowser {
         // 每5秒检查一次注入状态
         await this.waitForManualInjection();
       } else {
+        // 无头模式下直接抛出错误
+        this.log('⚠️ 无头模式下自动注入失败，可能需要手动处理验证');
+        this.log('建议：切换到可视模式 (HEADLESS=false) 进行首次设置');
         throw error;
       }
     }

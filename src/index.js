@@ -443,7 +443,8 @@ app.listen(port, async () => {
         port,
         debug: true,
         useEdge: true,
-        stealthMode: true
+        stealthMode: true,
+        headless: process.env.HEADLESS === 'true'
       });
       await autoBrowser.start();
       console.log(`✅ 自动化设置完成！API服务已准备就绪。\n`);

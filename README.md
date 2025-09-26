@@ -56,8 +56,30 @@ PORT=8000
 # 是否启用自动浏览器 (设为 false 使用手动模式)
 AUTO_BROWSER=true
 
+# 是否以无头模式运行浏览器 (适用于服务器环境)
+HEADLESS=false
+
 # 是否启用调试日志
 DEBUG=false
+```
+
+### 🚀 启动方式
+
+```bash
+# 默认启动 (读取 .env 配置)
+npm start
+
+# 自动模式 (有界面)
+npm run start:auto
+
+# 手动模式
+npm run start:manual
+
+# 无头模式 (适用于服务器)
+npm run start:headless
+
+# Docker 模式 (无头+调试)
+npm run start:docker
 ```
 
 ## 🔧 手动模式
@@ -79,10 +101,67 @@ DEBUG=false
 
 ## 🔍 故障排除
 
+### 本地运行
 - **浏览器未打开**: 检查是否安装了 Chrome/Chromium
 - **注入失败**: 尝试手动模式或检查网络连接
 - **验证问题**: 在自动打开的浏览器中完成验证即可
 - **API 调用失败**: 确保浏览器窗口保持打开状态
+
+### Docker 运行
+- **容器启动失败**: 检查是否分配足够的共享内存 `--shm-size=2g`
+- **Chrome 崩溃**: 确保使用了 `--security-opt seccomp:unconfined`
+- **403 错误**: 在首次使用时可能需要手动验证，建议先用可视模式完成验证
+- **内存不足**: Chrome 在容器中需要更多内存，建议至少 2GB
+
+### 环境变量
+- **HEADLESS=true**: 无头模式，适用于服务器
+- **AUTO_BROWSER=true**: 启用自动浏览器
+- **DEBUG=true**: 启用详细日志输出
+
+## 🐳 Docker 部署
+
+### 快速启动
+
+```bash
+# 构建并启动
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f cursor-bridge
+
+# 停止服务
+docker-compose down
+```
+
+### Docker 命令
+
+```bash
+# 构建镜像
+docker build -t cursor-bridge .
+
+# 运行容器
+docker run -d \
+  --name cursor-bridge \
+  -p 8000:8000 \
+  -e AUTO_BROWSER=true \
+  -e HEADLESS=true \
+  --shm-size=2g \
+  cursor-bridge
+
+# 查看容器日志
+docker logs -f cursor-bridge
+```
+
+### 带 Nginx 反向代理
+
+```bash
+# 启动完整服务栈 (包含 nginx)
+docker-compose --profile nginx up -d
+
+# 访问地址
+# HTTP: http://localhost
+# API: http://localhost/v1/chat/completions
+```
 
 ## 🏗️ 架构说明
 
@@ -91,3 +170,4 @@ DEBUG=false
 - **自动浏览器**: Puppeteer 自动化浏览器操作
 - **注入脚本**: 在真实浏览器环境中拦截 Cursor API
 - **轮询机制**: 服务器与浏览器间的通信桥梁
+- **Docker 支持**: 容器化部署，支持无头模式
