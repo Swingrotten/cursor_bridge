@@ -132,13 +132,18 @@ npm run start:docker
 ### 快速启动
 
 ```bash
-# 构建并启动
+# 1. 配置环境变量 (修改 .env 文件)
+# AUTO_BROWSER=true
+# HEADLESS=true
+# DEBUG=true
+
+# 2. 构建并启动
 docker-compose up -d
 
-# 查看日志
+# 3. 查看日志
 docker-compose logs -f cursor-bridge
 
-# 停止服务
+# 4. 停止服务
 docker-compose down
 ```
 

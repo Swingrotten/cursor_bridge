@@ -5,11 +5,8 @@ services:
     build: .
     ports:
       - "8000:8000"
-    environment:
-      - AUTO_BROWSER=true
-      - HEADLESS=true
-      - DEBUG=true
-      - PORT=8000
+    env_file:
+      - .env
     volumes:
       # 可选：持久化日志
       - ./logs:/app/logs
