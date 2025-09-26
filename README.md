@@ -53,15 +53,24 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 # 服务器端口
 PORT=8000
 
-# 是否启用自动浏览器 (设为 false 使用手动模式)
-AUTO_BROWSER=true
+# 是否启用自动浏览器
+AUTO_BROWSER=false  # true: 自动模式, false: 手动模式
 
-# 是否以无头模式运行浏览器 (适用于服务器环境)
-HEADLESS=false
+# 是否以无头模式运行浏览器
+HEADLESS=false      # true: 无头模式, false: 可视模式
 
 # 是否启用调试日志
-DEBUG=false
+DEBUG=false         # true: 详细日志, false: 基本日志
 ```
+
+### 📋 使用场景配置
+
+| 场景 | AUTO_BROWSER | HEADLESS | DEBUG | 说明 |
+|------|-------------|----------|-------|------|
+| **本地开发** | `true` | `false` | `true` | 推荐配置，可视化调试 |
+| **服务器部署** | `true` | `true` | `false` | 生产环境，稳定运行 |
+| **Docker 容器** | `true` | `true` | `true` | 容器化部署，便于监控 |
+| **手动模式** | `false` | `false` | `false` | 完全手动控制 |
 
 ### 🚀 启动方式
 
