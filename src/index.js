@@ -167,6 +167,24 @@ app.get('/injection.js', (req, res) => {
   });
 });
 
+// 强制重新注入脚本
+app.post('/bridge/reinject', async (req, res) => {
+  console.log('🔄 收到重新注入请求');
+
+  if (global.autoBrowser && global.autoBrowser.page) {
+    try {
+      await global.autoBrowser.performInjection();
+      console.log('✅ 重新注入成功');
+      res.json({ success: true, message: '重新注入成功' });
+    } catch (error) {
+      console.error('❌ 重新注入失败:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  } else {
+    res.status(503).json({ success: false, error: '自动浏览器未运行' });
+  }
+});
+
 // 接收浏览器事件
 app.post('/bridge/event', (req, res) => {
   const { type, data } = req.body;
@@ -333,6 +351,9 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
   }
 
+  // 调试：打印原始消息
+  console.log('📥 收到原始消息:', JSON.stringify(messages, null, 2));
+
   if (!browserConnected) {
     return res.status(503).json({
       error: {
@@ -455,6 +476,8 @@ app.listen(port, async () => {
         stealthMode: true,
         headless: process.env.HEADLESS === 'true'
       });
+      // 保存 autoBrowser 实例到全局，用于重新注入
+      global.autoBrowser = autoBrowser;
       await autoBrowser.start();
       console.log(`✅ 自动化设置完成！API服务已准备就绪。\n`);
     } catch (error) {

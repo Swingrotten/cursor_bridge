@@ -32,10 +32,63 @@
   }
 
   function toCursorMessages(listOpenAI) {
-    return (listOpenAI || []).map(m => ({
-      role: m.role,
-      parts: [{ type: 'text', text: String(m.content ?? '') }],
-    }));
+    console.log('[Cursor Bridge] 🔄 转换函数被调用，输入:', listOpenAI);
+
+    const result = (listOpenAI || []).map(m => {
+      const message = { role: m.role, parts: [] };
+
+      if (DEBUG && Array.isArray(m.content)) {
+        console.log('[Cursor Bridge] 处理多模态消息:', m.content);
+      }
+
+      // 处理不同的 content 格式
+      if (typeof m.content === 'string') {
+        // 简单文本消息
+        message.parts.push({ type: 'text', text: m.content });
+      } else if (Array.isArray(m.content)) {
+        // OpenAI 多模态消息格式
+        m.content.forEach(part => {
+          if (part.type === 'text') {
+            message.parts.push({ type: 'text', text: part.text || '' });
+          } else if (part.type === 'image_url') {
+            // OpenAI 图片格式转换为 Cursor 格式
+            const imageUrl = part.image_url.url;
+            if (imageUrl.startsWith('data:image/')) {
+              // base64 图片
+              const [header, data] = imageUrl.split(',');
+              const mediaType = header.match(/data:(image\/[^;]+)/)?.[1] || 'image/jpeg';
+
+              if (DEBUG) {
+                console.log('[Cursor Bridge] 添加图片:', { mediaType, dataLength: data?.length });
+              }
+
+              message.parts.push({
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: mediaType,
+                  data: data
+                }
+              });
+            } else {
+              // URL 图片 - 转为文本描述 (Cursor 可能不支持外部 URL)
+              message.parts.push({
+                type: 'text',
+                text: `[图片URL: ${imageUrl}]`
+              });
+            }
+          }
+        });
+      } else {
+        // 兜底：转为文本
+        message.parts.push({ type: 'text', text: String(m.content ?? '') });
+      }
+
+      return message;
+    });
+
+    console.log('[Cursor Bridge] 🔄 转换函数结果:', result);
+    return result;
   }
 
   function buildCursorBody({ messagesOpenAI, model, rid }) {
@@ -141,9 +194,52 @@
           let body;
           try { body = JSON.parse(raw); } catch {}
           if (body && typeof body === 'object') {
-            // 转换为OpenAI格式
+            // 检查消息格式：如果已经是Cursor格式(有parts)，直接使用；否则转换
             const current = Array.isArray(body.messages) ? body.messages : [];
-            let msgsOpenAI = current.map(m => ({ role: m.role, content: readText(m) }));
+            let msgsOpenAI;
+
+            // 如果消息已经有parts结构，说明是我们构建的Cursor格式，转为OpenAI格式但保留多模态内容
+            if (current.length > 0 && current[0].parts) {
+              console.log('[Cursor Bridge] 🔍 检测到Cursor格式消息，开始转换:', current);
+              msgsOpenAI = current.map(m => {
+                if (!m.parts || !Array.isArray(m.parts)) {
+                  return { role: m.role, content: '' };
+                }
+
+                // 处理多模态parts
+                if (m.parts.length === 1 && m.parts[0].type === 'text') {
+                  // 纯文本消息
+                  return { role: m.role, content: m.parts[0].text || '' };
+                } else {
+                  // 多模态消息，转换为OpenAI格式
+                  const content = [];
+                  m.parts.forEach(part => {
+                    if (part.type === 'text') {
+                      content.push({ type: 'text', text: part.text || '' });
+                    } else if (part.type === 'image' && part.source) {
+                      content.push({
+                        type: 'image_url',
+                        image_url: {
+                          url: `data:${part.source.media_type};base64,${part.source.data}`
+                        }
+                      });
+                    }
+                  });
+                  // 对于多模态消息，保持数组格式
+                  if (content.length === 1 && content[0].type === 'text') {
+                    return { role: m.role, content: content[0].text || '' };
+                  } else {
+                    return { role: m.role, content: content };
+                  }
+                }
+              });
+            } else {
+              // 原始的OpenAI格式，用readText处理
+              console.log('[Cursor Bridge] 🔍 检测到OpenAI格式消息，使用readText处理:', current);
+              msgsOpenAI = current.map(m => ({ role: m.role, content: readText(m) }));
+            }
+
+            console.log('[Cursor Bridge] 🔍 最终转换结果:', msgsOpenAI);
 
             // 检查是否有上游消息覆盖
             if (window.__upstreamMessages && Array.isArray(window.__upstreamMessages)) {
@@ -250,12 +346,17 @@
         context: [],
         model: model,
         id: 'req_' + Math.random().toString(16).slice(2),
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        messages: toCursorMessages(messages), // 使用我们的转换函数
         trigger: 'submit-message',
         __rid: rid
       };
 
       console.log('[Cursor Bridge] 发送消息:', { model, messageCount: messages.length });
+
+      if (DEBUG) {
+        console.log('[Cursor Bridge] 原始消息:', messages);
+        console.log('[Cursor Bridge] 转换后消息:', body.messages);
+      }
 
       // 直接调用API
       const response = await fetch('/api/chat', {

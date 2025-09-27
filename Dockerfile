@@ -46,11 +46,17 @@ WORKDIR /app
 # 复制 package 文件
 COPY package*.json ./
 
-# 设置 Puppeteer 配置 (跳过下载，使用系统 Chrome)
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# ⚠️ 关键修改：在 npm ci 之前设置环境变量
+# 设置 Puppeteer 跳过下载 Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# 安装 Node.js 依赖 (美国服务器使用官方源更快)
-RUN npm ci --omit=dev && \
+# 设置 npm 配置并安装依赖
+RUN npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retries 3 && \
+    npm ci --omit=dev && \
     npm cache clean --force
 
 # 复制应用代码
@@ -67,9 +73,6 @@ USER appuser
 
 # 暴露端口
 EXPOSE 8200
-
-# 设置 Puppeteer 环境变量
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # 启动命令
 CMD ["npm", "run", "start:docker"]
