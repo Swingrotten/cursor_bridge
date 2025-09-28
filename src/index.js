@@ -10,22 +10,177 @@ const app = express();
 const port = process.env.PORT || 8000;
 const autoMode = process.env.AUTO_BROWSER === 'true'; // 默认关闭自动模式，避免影响手动使用
 
-// 调试环境变量
-console.log('🔧 环境变量调试:');
-console.log(`   PORT: ${port}`);
-console.log(`   AUTO_BROWSER: ${process.env.AUTO_BROWSER}`);
-console.log(`   autoMode: ${autoMode}`);
-console.log(`   DEBUG: ${process.env.DEBUG}`);
-console.log('');
+// 超时配置
+const REQUEST_START_TIMEOUT = parseInt(process.env.REQUEST_START_TIMEOUT) || 15000;
+const STREAM_RESPONSE_TIMEOUT = parseInt(process.env.STREAM_RESPONSE_TIMEOUT) || 30000;
+
+// 调试环境变量（受DEBUG_ENV控制）
+if (process.env.DEBUG_ENV === 'true') {
+  console.log('🔧 环境变量调试:');
+  console.log(`   PORT: ${port}`);
+  console.log(`   AUTO_BROWSER: ${process.env.AUTO_BROWSER}`);
+  console.log(`   autoMode: ${autoMode}`);
+  console.log(`   HEADLESS: ${process.env.HEADLESS}`);
+  console.log(`   DEBUG: ${process.env.DEBUG}`);
+  console.log(`   DEBUG_ENV: ${process.env.DEBUG_ENV}`);
+  console.log(`   DEBUG_BROWSER: ${process.env.DEBUG_BROWSER}`);
+  console.log(`   REQUEST_START_TIMEOUT: ${REQUEST_START_TIMEOUT}ms`);
+  console.log(`   STREAM_RESPONSE_TIMEOUT: ${STREAM_RESPONSE_TIMEOUT}ms`);
+  console.log('');
+}
 
 // 自动浏览器实例
 let autoBrowser = null;
 
 // 存储活跃的SSE连接和请求
-const activeStreams = new Map();
+const activeStreams = new Map(); // requestId -> { res, lastActivity, timeouts }
 const pendingRequests = new Map();
+const nonStreamRequests = new Map(); // requestId -> { resolve, reject, data, startTime, model }
 const browserQueue = []; // 浏览器轮询队列
 let browserConnected = false;
+
+// 流超时管理
+const streamTimeouts = new Map(); // requestId -> { startTimeout, responseTimeout }
+
+// 流清理函数
+function cleanupStream(requestId, reason = '未知原因') {
+  console.log(`🧹 清理流: ${requestId} (原因: ${reason})`);
+  
+  // 获取流响应对象
+  const streamData = activeStreams.get(requestId);
+  if (streamData && streamData.res) {
+    try {
+      // 发送最终数据并关闭流
+      streamData.res.write(`data: ${JSON.stringify({
+        id: requestId,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: pendingRequests.get(requestId)?.model || 'claude-sonnet-4-20250514',
+        choices: [{ index: 0, delta: { content: `\n\n⚠️ 流已超时关闭 (${reason})` }, finish_reason: 'stop' }]
+      })}\n\n`);
+      streamData.res.write('data: [DONE]\n\n');
+      streamData.res.end();
+    } catch (error) {
+      console.error(`清理流失败: ${requestId}`, error);
+    }
+  }
+  
+  // 复用超时清理逻辑
+  clearTimeouts(requestId);
+  
+  // 清理流数据
+  activeStreams.delete(requestId);
+  pendingRequests.delete(requestId);
+  
+  // 清理非流式请求（如果存在）
+  if (nonStreamRequests.has(requestId)) {
+    const nonStreamData = nonStreamRequests.get(requestId);
+    // 先删除再reject，避免重复处理
+    nonStreamRequests.delete(requestId);
+    nonStreamData.reject(new Error(`请求超时: ${reason}`));
+  }
+  
+  // 还需要根据RID清理 (查找对应的RID)
+  for (const [rid, streamRes] of activeStreams.entries()) {
+    if (streamRes === streamData?.res) {
+      activeStreams.delete(rid);
+      break;
+    }
+  }
+}
+
+// 设置流开始超时 - 只检查流是否能够开始
+function setupStreamStartTimeout(requestId) {
+  const startTimeout = setTimeout(() => {
+    if (pendingRequests.has(requestId) && !activeStreams.has(requestId)) {
+      cleanupStream(requestId, `初始超时 ${REQUEST_START_TIMEOUT/1000}秒内未开始响应`);
+    }
+  }, REQUEST_START_TIMEOUT);
+  
+  streamTimeouts.set(requestId, { startTimeout });
+  console.log(`⏰ 已设置流开始超时: ${requestId} (${REQUEST_START_TIMEOUT/1000}s)`);
+}
+
+// 设置响应完成超时 - 在done事件后等待usage事件
+function setupResponseTimeout(requestId) {
+  const timeouts = streamTimeouts.get(requestId) || {};
+  
+  // 清理开始超时（如果还存在）
+  if (timeouts.startTimeout) {
+    clearTimeout(timeouts.startTimeout);
+  }
+  
+  // 清理delta超时（done事件后不再接收delta）
+  if (timeouts.deltaTimeout) {
+    clearTimeout(timeouts.deltaTimeout);
+  }
+  
+  // 设置响应超时
+  const responseTimeout = setTimeout(() => {
+    // 分别处理流式和非流式请求的超时
+    if (nonStreamRequests.has(requestId)) {
+      // 非流式请求超时：直接返回已收到的内容
+      const requestData = nonStreamRequests.get(requestId);
+      nonStreamRequests.delete(requestId);
+      
+      const response = {
+        id: requestId,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: requestData.model || 'claude-sonnet-4-20250514',
+        choices: [{
+          index: 0,
+          message: { 
+            role: 'assistant', 
+            content: requestData.content || '' 
+          },
+          finish_reason: 'stop'
+        }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+      };
+      
+      requestData.resolve(response);
+      console.log(`⏰ 非流式请求超时完成: ${requestId} (使用已收到内容)`);
+      clearTimeouts(requestId);
+    } else if (activeStreams.has(requestId)) {
+      // 流式请求超时：使用原有清理逻辑
+      cleanupStream(requestId, `响应超时 ${STREAM_RESPONSE_TIMEOUT/1000}秒未收到usage事件`);
+    }
+  }, STREAM_RESPONSE_TIMEOUT);
+  
+  streamTimeouts.set(requestId, { ...timeouts, startTimeout: null, deltaTimeout: null, responseTimeout });
+  console.log(`⏰ 已设置响应完成超时: ${requestId} (${STREAM_RESPONSE_TIMEOUT/1000}s)`);
+}
+
+// 清理超时定时器 - 复用现有逻辑
+function clearTimeouts(requestId) {
+  const timeouts = streamTimeouts.get(requestId);
+  if (timeouts) {
+    if (timeouts.startTimeout) clearTimeout(timeouts.startTimeout);
+    if (timeouts.responseTimeout) clearTimeout(timeouts.responseTimeout);
+    if (timeouts.deltaTimeout) clearTimeout(timeouts.deltaTimeout);
+    streamTimeouts.delete(requestId);
+  }
+}
+
+// 设置或重置delta活动超时 - 检查delta事件之间的间隔
+function resetDeltaTimeout(requestId) {
+  const timeouts = streamTimeouts.get(requestId) || {};
+  
+  // 清理之前的delta超时（如果存在）
+  if (timeouts.deltaTimeout) {
+    clearTimeout(timeouts.deltaTimeout);
+  }
+  
+  // 设置新的delta超时
+  const deltaTimeout = setTimeout(() => {
+    if (activeStreams.has(requestId)) {
+      cleanupStream(requestId, `Delta超时 ${STREAM_RESPONSE_TIMEOUT/1000}秒无新的delta事件`);
+    }
+  }, STREAM_RESPONSE_TIMEOUT);
+  
+  streamTimeouts.set(requestId, { ...timeouts, deltaTimeout });
+}
 
 app.use(cors());
 app.use(express.json());
@@ -107,7 +262,8 @@ fetch('http://localhost:${port}/injection.js')
     <div class="step">
         <h3>步骤 4: 使用 API</h3>
         <p>现在可以使用标准的 OpenAI API 格式调用：</p>
-        <div class="code">POST http://localhost:${port}/v1/chat/completions
+        <div class="code">// 流式输出（实时响应）
+POST http://localhost:${port}/v1/chat/completions
 Content-Type: application/json
 
 {
@@ -116,6 +272,18 @@ Content-Type: application/json
     {"role": "user", "content": "你好"}
   ],
   "stream": true
+}
+
+// 非流式输出（一次性完整响应）
+POST http://localhost:${port}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {"role": "user", "content": "你好"}
+  ],
+  "stream": false
 }</div>
     </div>
 
@@ -124,6 +292,16 @@ Content-Type: application/json
         <p>服务器运行正常，等待浏览器连接...</p>
         <p>端口: ${port} | 时间: ${new Date().toLocaleString()}</p>
     </div>
+
+    <h2>🚀 功能特性</h2>
+    <ul>
+        <li><strong>流式输出</strong> - 实时流式响应，适合长文本生成</li>
+        <li><strong>非流式输出</strong> - 一次性完整响应，适合短文本或需要原子性的场景</li>
+        <li><strong>混合请求</strong> - 同时支持流式和非流式请求</li>
+        <li><strong>自动超时管理</strong> - 智能处理请求超时，避免资源泄漏</li>
+        <li><strong>浏览器自动化</strong> - 自动打开浏览器并注入脚本</li>
+        <li><strong>OpenAI兼容</strong> - 完全兼容OpenAI API格式</li>
+    </ul>
 
     <h2>📚 支持的模型</h2>
     <ul>
@@ -141,6 +319,9 @@ Content-Type: application/json
         <li>检查控制台是否有错误信息</li>
         <li>确认网络连接正常</li>
         <li>重新注入脚本如果连接中断</li>
+        <li>使用 <code>npm run test:stream</code> 测试流式输出</li>
+        <li>使用 <code>npm run test:non-stream</code> 测试非流式输出</li>
+        <li>访问 <a href="/health" target="_blank">/health</a> 查看详细状态信息</li>
     </ul>
 </body>
 </html>
@@ -156,10 +337,16 @@ app.get('/injection.js', (req, res) => {
       return;
     }
 
-    // 动态替换端口号
-    const modifiedScript = data.replace(
+    // 动态替换端口号和DEBUG配置
+    let modifiedScript = data.replace(
       'http://localhost:8000',
       `http://localhost:${port}`
+    );
+    
+    // 替换DEBUG配置（受DEBUG_BROWSER环境变量控制）
+    modifiedScript = modifiedScript.replace(
+      'const DEBUG = true;',
+      `const DEBUG = ${process.env.DEBUG_BROWSER === 'true'};`
     );
 
     res.setHeader('Content-Type', 'application/javascript');
@@ -180,27 +367,56 @@ app.post('/bridge/event', (req, res) => {
       break;
 
     case 'meta':
-      // 开始新的流 - 找到最近的等待请求
+      // 开始新的响应 - 找到最近的等待请求
       const { rid } = data;
       let matchedRequestId = null;
+      let isNonStream = false;
 
-      // 寻找匹配的pending request (按时间倒序查找最新的)
-      for (const [requestId, requestData] of Array.from(pendingRequests.entries()).reverse()) {
-        if (!activeStreams.has(requestId)) {
+      // 先检查非流式请求
+      for (const [requestId, requestData] of Array.from(nonStreamRequests.entries()).reverse()) {
+        if (!requestData.started) {
           matchedRequestId = requestId;
+          requestData.started = true;
+          requestData.rid = rid;
+          isNonStream = true;
+          console.log(`🚀 开始非流式响应: ${matchedRequestId} (Cursor RID: ${rid})`);
           break;
         }
       }
 
-      if (matchedRequestId) {
-        const { res: streamRes } = pendingRequests.get(matchedRequestId);
-        activeStreams.set(matchedRequestId, streamRes);
+      // 如果没找到非流式请求，则检查流式请求
+      if (!matchedRequestId) {
+        for (const [requestId, requestData] of Array.from(pendingRequests.entries()).reverse()) {
+          if (!activeStreams.has(requestId)) {
+            matchedRequestId = requestId;
+            break;
+          }
+        }
 
-        // 也为Cursor的RID建立映射
-        activeStreams.set(rid, streamRes);
+        if (matchedRequestId) {
+          const { res: streamRes, model } = pendingRequests.get(matchedRequestId);
+          const currentTime = Date.now();
+          
+          // 存储流数据，包含最后活动时间
+          activeStreams.set(matchedRequestId, { 
+            res: streamRes, 
+            lastActivity: currentTime,
+            model: model,
+            startTime: currentTime
+          });
 
-        console.log(`🚀 开始流式响应: ${matchedRequestId} (Cursor RID: ${rid})`);
-      } else {
+          // 也为Cursor的RID建立映射
+          activeStreams.set(rid, streamRes);
+
+           // 设置流开始超时检测，同时启动delta超时检测
+           setupStreamStartTimeout(matchedRequestId);
+           resetDeltaTimeout(matchedRequestId);
+
+           console.log(`🚀 开始流式响应: ${matchedRequestId} (Cursor RID: ${rid})`);
+        }
+      }
+
+      if (!matchedRequestId) {
         console.log(`⚠️ 没有找到匹配的请求，RID: ${rid}`);
       }
       break;
@@ -208,84 +424,201 @@ app.post('/bridge/event', (req, res) => {
     case 'delta':
       // 转发增量数据
       const { rid: deltaRid, delta } = data;
-      if (activeStreams.has(deltaRid)) {
+      
+      // 首先检查是否是非流式请求
+      let foundNonStream = false;
+      for (const [requestId, requestData] of nonStreamRequests.entries()) {
+        if (requestData.rid === deltaRid) {
+          // 累积内容到非流式请求
+          if (!requestData.content) {
+            requestData.content = '';
+          }
+          requestData.content += delta;
+          foundNonStream = true;
+          break;
+        }
+      }
+      
+      // 如果不是非流式请求，则处理流式请求
+      if (!foundNonStream && activeStreams.has(deltaRid)) {
         const streamRes = activeStreams.get(deltaRid);
 
-        // 找到对应的请求ID
+        // 找到对应的请求ID和流数据
         let requestId = deltaRid;
-        for (const [id, _] of pendingRequests) {
-          if (activeStreams.get(id) === streamRes) {
-            requestId = id;
-            break;
+        let streamData = null;
+        
+        // 如果deltaRid就是requestId，直接获取流数据
+        if (typeof activeStreams.get(deltaRid) === 'object' && activeStreams.get(deltaRid).res) {
+          requestId = deltaRid;
+          streamData = activeStreams.get(deltaRid);
+        } else {
+          // 否则查找匹配的请求ID
+          for (const [id, data] of activeStreams.entries()) {
+            if (typeof data === 'object' && data.res === streamRes) {
+              requestId = id;
+              streamData = data;
+              break;
+            }
           }
         }
 
-        try {
-          streamRes.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: pendingRequests.get(requestId)?.model || 'claude-sonnet-4-20250514',
-            choices: [{ index: 0, delta: { content: delta }, finish_reason: null }]
-          })}\n\n`);
-        } catch (error) {
-          console.error('发送增量数据失败:', error);
-          activeStreams.delete(deltaRid);
-          if (requestId !== deltaRid) {
-            activeStreams.delete(requestId);
-            pendingRequests.delete(requestId);
+        if (streamData) {
+          try {
+            // 更新最后活动时间
+            streamData.lastActivity = Date.now();
+            
+            // 重置delta超时 - 每次收到delta都重置计时器
+            resetDeltaTimeout(requestId);
+            
+            streamData.res.write(`data: ${JSON.stringify({
+              id: requestId,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: streamData.model || 'claude-sonnet-4-20250514',
+              choices: [{ index: 0, delta: { content: delta }, finish_reason: null }]
+            })}\n\n`);
+          } catch (error) {
+            console.error('发送增量数据失败:', error);
+            cleanupStream(requestId, '发送数据失败');
           }
         }
-      } else {
-        console.log(`⚠️ 没有找到活跃流，RID: ${deltaRid}`);
+      } else if (!foundNonStream) {
+        console.log(`⚠️ 没有找到活跃流或非流式请求，RID: ${deltaRid}`);
       }
       break;
 
     case 'done':
-      // done 事件不再立即关闭流，只记录日志
+      // done 事件表示响应内容已完成，开始等待usage事件
       const { rid: doneRid } = data;
-      console.log(`📋 收到done事件，但继续保持流开启: ${doneRid}`);
-      break;
-
-    case 'usage':
-      // usage 事件表示响应真正完成，这时才关闭流
-      const { rid: usageRid } = data;
-      if (activeStreams.has(usageRid)) {
-        const streamRes = activeStreams.get(usageRid);
-
-        // 找到对应的请求ID
-        let requestId = usageRid;
-        for (const [id, _] of pendingRequests) {
-          if (activeStreams.get(id) === streamRes) {
-            requestId = id;
+      console.log(`📋 收到done事件，开始等待usage事件: ${doneRid}`);
+      
+      // 检查是否是非流式请求
+      let foundNonStreamDone = false;
+      for (const [requestId, requestData] of nonStreamRequests.entries()) {
+        if (requestData.rid === doneRid) {
+          console.log(`📋 非流式请求内容已完成: ${requestId}`);
+          // 为非流式请求也设置响应完成超时，防止usage事件不到达
+          setupResponseTimeout(requestId);
+          foundNonStreamDone = true;
+          break;
+        }
+      }
+      
+      // 如果不是非流式请求，则处理流式请求的done事件
+      if (!foundNonStreamDone) {
+        // 找到对应的请求ID并启动响应完成超时
+        let doneRequestId = doneRid;
+        for (const [id, data] of activeStreams.entries()) {
+          if (typeof data === 'object' && activeStreams.get(doneRid) === data.res) {
+            doneRequestId = id;
             break;
           }
         }
+        
+        if (activeStreams.has(doneRequestId) || activeStreams.has(doneRid)) {
+          setupResponseTimeout(doneRequestId);
+        }
+      }
+      break;
 
-        try {
-          streamRes.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: pendingRequests.get(requestId)?.model || 'claude-sonnet-4-20250514',
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
-          })}\n\n`);
-          streamRes.write('data: [DONE]\n\n');
-          streamRes.end();
-        } catch (error) {
-          console.error('完成响应失败:', error);
+    case 'usage':
+      // usage 事件表示响应真正完成
+      const { rid: usageRid, usage } = data;
+      
+      // 首先检查非流式请求
+      let foundNonStreamRequest = false;
+      for (const [requestId, requestData] of nonStreamRequests.entries()) {
+        if (requestData.rid === usageRid) {
+          // 立即清理，避免重复处理
+          nonStreamRequests.delete(requestId);
+          
+          try {
+            // 返回完整的非流式响应
+            const response = {
+              id: requestId,
+              object: 'chat.completion',
+              created: Math.floor(Date.now() / 1000),
+              model: requestData.model || 'claude-sonnet-4-20250514',
+              choices: [{
+                index: 0,
+                message: { 
+                  role: 'assistant', 
+                  content: requestData.content || '' 
+                },
+                finish_reason: 'stop'
+              }],
+              usage: usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+            };
+            
+            requestData.resolve(response);
+            console.log(`✅ 完成非流式响应: ${requestId} (Cursor RID: ${usageRid})`);
+            foundNonStreamRequest = true;
+          } catch (error) {
+            console.error('完成非流式响应失败:', error);
+            requestData.reject(error);
+          }
+          
+          // 复用现有的超时清理逻辑
+          clearTimeouts(requestId);
+          
+          break;
+        }
+      }
+      
+      // 如果不是非流式请求，则处理流式请求
+      if (!foundNonStreamRequest && activeStreams.has(usageRid)) {
+        const streamEntry = activeStreams.get(usageRid);
+
+        // 找到对应的请求ID
+        let requestId = usageRid;
+        let streamData = null;
+        
+        // 如果usageRid就是requestId，直接获取流数据
+        if (typeof streamEntry === 'object' && streamEntry.res) {
+          requestId = usageRid;
+          streamData = streamEntry;
+        } else {
+          // 否则查找匹配的请求ID
+          for (const [id, data] of activeStreams.entries()) {
+            if (typeof data === 'object' && data.res === streamEntry) {
+              requestId = id;
+              streamData = data;
+              break;
+            }
+          }
         }
 
-        // 清理所有相关的映射
-        activeStreams.delete(usageRid);
-        if (requestId !== usageRid) {
-          activeStreams.delete(requestId);
+        if (streamData) {
+          try {
+            // 发送最终完成消息
+            streamData.res.write(`data: ${JSON.stringify({
+              id: requestId,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: streamData.model || 'claude-sonnet-4-20250514',
+              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+              usage: usage || {}
+            })}\n\n`);
+            streamData.res.write('data: [DONE]\n\n');
+            streamData.res.end();
+            
+            console.log(`✅ 完成流式响应: ${requestId} (Cursor RID: ${usageRid}) [usage事件触发]`);
+          } catch (error) {
+            console.error('完成响应失败:', error);
+          }
+          
+          // 复用超时清理逻辑
+          clearTimeouts(requestId);
+          
+          // 清理所有相关的映射
+          activeStreams.delete(usageRid);
+          if (requestId !== usageRid) {
+            activeStreams.delete(requestId);
+          }
           pendingRequests.delete(requestId);
         }
-
-        console.log(`✅ 完成响应: ${requestId} (Cursor RID: ${usageRid}) [usage事件触发]`);
-      } else {
-        console.log(`⚠️ 没有找到活跃流，无法完成响应，RID: ${usageRid}`);
+      } else if (!foundNonStreamRequest) {
+        console.log(`⚠️ 没有找到活跃流或非流式请求，无法完成响应，RID: ${usageRid}`);
       }
       break;
   }
@@ -377,40 +710,47 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     console.log(`📝 任务已加入队列: ${requestId}, 队列长度: ${browserQueue.length}`);
 
-    // 超时检查
-    setTimeout(() => {
-      if (pendingRequests.has(requestId) && !activeStreams.has(requestId)) {
-        console.log(`⏰ 请求超时: ${requestId}`);
-        const pendingRes = pendingRequests.get(requestId).res;
-        try {
-          pendingRes.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: model,
-            choices: [{ index: 0, delta: { content: '⚠️ 请求超时，请检查浏览器是否正常运行cursor.com页面' }, finish_reason: null }]
-          })}\n\n`);
-          pendingRes.write('data: [DONE]\n\n');
-          pendingRes.end();
-        } catch (e) {}
-        pendingRequests.delete(requestId);
-      }
-    }, 15000); // 15秒超时
+    // 这个超时检查已经在meta事件中通过setupStreamStartTimeout处理
 
   } else {
-    // 非流式响应
-    res.json({
-      id: requestId,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: model,
-      choices: [{
-        index: 0,
-        message: { role: 'assistant', content: '非流式响应暂不支持，请使用stream: true' },
-        finish_reason: 'stop'
-      }],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-    });
+    // 非流式响应 - 等待完整响应周期后一次性返回
+    try {
+      const response = await new Promise((resolve, reject) => {
+        // 存储非流式请求，等待浏览器事件
+        nonStreamRequests.set(requestId, { 
+          resolve, 
+          reject, 
+          model, 
+          messages, 
+          content: '', 
+          startTime: Date.now(),
+          started: false
+        });
+
+        // 将任务加入浏览器队列
+        browserQueue.push({
+          type: 'send_message',
+          rid: requestId,
+          messages: messages,
+          model: model,
+          timestamp: Date.now()
+        });
+
+        console.log(`📝 非流式任务已加入队列: ${requestId}, 队列长度: ${browserQueue.length}`);
+        
+        // 非流式请求不设置超时，等待完整的响应周期
+      });
+
+      res.json(response);
+    } catch (error) {
+      console.error('非流式请求失败:', error);
+      res.status(500).json({
+        error: {
+          message: error.message || '请求处理失败',
+          type: 'internal_error'
+        }
+      });
+    }
   }
 });
 
@@ -434,6 +774,10 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     activeStreams: activeStreams.size,
+    pendingRequests: pendingRequests.size,
+    nonStreamRequests: nonStreamRequests.size,
+    browserQueue: browserQueue.length,
+    browserConnected: browserConnected,
     timestamp: new Date().toISOString()
   });
 });
@@ -450,7 +794,7 @@ app.listen(port, async () => {
     try {
       autoBrowser = new AutoBrowser({
         port,
-        debug: true,
+        debug: process.env.DEBUG === 'true',
         useEdge: true,
         stealthMode: true,
         headless: process.env.HEADLESS === 'true'

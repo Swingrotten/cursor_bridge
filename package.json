@@ -5,19 +5,20 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "start:auto": "AUTO_BROWSER=true node src/index.js",
-    "start:manual": "AUTO_BROWSER=false node src/index.js",
-    "start:headless": "AUTO_BROWSER=true HEADLESS=true node src/index.js",
-    "start:docker": "AUTO_BROWSER=true HEADLESS=true DEBUG=true node src/index.js",
+    "start:auto": "AUTO_BROWSER=true HEADLESS=false DEBUG_ENV=true DEBUG_BROWSER=true node src/index.js",
+    "start:manual": "AUTO_BROWSER=false DEBUG_ENV=false DEBUG_BROWSER=true node src/index.js",
+    "start:headless": "AUTO_BROWSER=true HEADLESS=true DEBUG=false DEBUG_ENV=false DEBUG_BROWSER=false node src/index.js",
+    "start:docker": "AUTO_BROWSER=true HEADLESS=true DEBUG=true DEBUG_ENV=false DEBUG_BROWSER=false node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "node test/test.js"
+    "test": "npm run test:stream && npm run test:non-stream",
+    "test:stream": "node test/test-stream-timeout.js",
+    "test:non-stream": "node test/test-non-stream.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^4.18.2",
-    "puppeteer": "^21.6.1",
-    "uuid": "^9.0.1"
+    "puppeteer": "^21.6.1"
   },
   "devDependencies": {
     "axios": "^1.6.2",
