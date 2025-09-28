@@ -164,7 +164,7 @@ function clearTimeouts(requestId) {
 }
 
 // 设置或重置delta活动超时 - 检查delta事件之间的间隔
-function resetDeltaTimeout(requestId) {
+function resetDeltaTimeout(requestId, isFirstDelta = false) {
   const timeouts = streamTimeouts.get(requestId) || {};
   
   // 清理之前的delta超时（如果存在）
@@ -172,12 +172,18 @@ function resetDeltaTimeout(requestId) {
     clearTimeout(timeouts.deltaTimeout);
   }
   
+  // 第一个delta使用REQUEST_START_TIMEOUT，后续delta使用STREAM_RESPONSE_TIMEOUT
+  const timeout = isFirstDelta ? REQUEST_START_TIMEOUT : STREAM_RESPONSE_TIMEOUT;
+  const timeoutMsg = isFirstDelta 
+    ? `初始Delta超时 ${timeout/1000}秒未收到第一个delta事件`
+    : `Delta超时 ${timeout/1000}秒无新的delta事件`;
+  
   // 设置新的delta超时
   const deltaTimeout = setTimeout(() => {
     if (activeStreams.has(requestId)) {
-      cleanupStream(requestId, `Delta超时 ${STREAM_RESPONSE_TIMEOUT/1000}秒无新的delta事件`);
+      cleanupStream(requestId, timeoutMsg);
     }
-  }, STREAM_RESPONSE_TIMEOUT);
+  }, timeout);
   
   streamTimeouts.set(requestId, { ...timeouts, deltaTimeout });
 }
@@ -440,13 +446,13 @@ app.post('/bridge/event', (req, res) => {
           // 也为Cursor的RID建立映射
           activeStreams.set(rid, streamRes);
 
-           // 流已开始，清理开始超时，启动delta超时检测
+           // 流已开始，清理开始超时，启动delta超时检测（第一个delta使用更长的超时）
            const timeouts = streamTimeouts.get(matchedRequestId) || {};
            if (timeouts.startTimeout) {
              clearTimeout(timeouts.startTimeout);
              console.log(`⏰ 流已开始，清理开始超时: ${matchedRequestId}`);
            }
-           resetDeltaTimeout(matchedRequestId);
+           resetDeltaTimeout(matchedRequestId, true); // 第一个delta使用REQUEST_START_TIMEOUT
 
            console.log(`🚀 开始流式响应: ${matchedRequestId} (Cursor RID: ${rid})`);
         }
@@ -503,8 +509,8 @@ app.post('/bridge/event', (req, res) => {
             // 更新最后活动时间
             streamData.lastActivity = Date.now();
             
-            // 重置delta超时 - 每次收到delta都重置计时器
-            resetDeltaTimeout(requestId);
+            // 重置delta超时 - 每次收到delta都重置计时器（后续delta使用STREAM_RESPONSE_TIMEOUT）
+            resetDeltaTimeout(requestId, false);
             
             streamData.res.write(`data: ${JSON.stringify({
               id: requestId,
