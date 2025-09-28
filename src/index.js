@@ -305,12 +305,36 @@ Content-Type: application/json
 
     <h2>📚 支持的模型</h2>
     <ul>
-        <li>claude-sonnet-4-20250514 (默认)</li>
-        <li>claude-opus-4-1-20250805</li>
-        <li>claude-opus-4-20250514</li>
-        <li>gpt-5</li>
-        <li>gemini-2.5-pro</li>
-        <li>deepseek-v3.1</li>
+        <li><strong>Claude 系列:</strong></li>
+        <li>&nbsp;&nbsp;claude-sonnet-4-20250514 (默认)</li>
+        <li>&nbsp;&nbsp;claude-opus-4-1-20250805</li>
+        <li>&nbsp;&nbsp;claude-opus-4-20250514</li>
+        <li>&nbsp;&nbsp;claude-3.5-sonnet</li>
+        <li>&nbsp;&nbsp;claude-3.5-haiku</li>
+        <li>&nbsp;&nbsp;claude-3.7-sonnet</li>
+        <li>&nbsp;&nbsp;claude-4-sonnet</li>
+        <li>&nbsp;&nbsp;claude-4-opus</li>
+        <li>&nbsp;&nbsp;claude-4.1-opus</li>
+        <li><strong>GPT 系列:</strong></li>
+        <li>&nbsp;&nbsp;gpt-5</li>
+        <li>&nbsp;&nbsp;gpt-5-codex</li>
+        <li>&nbsp;&nbsp;gpt-5-mini</li>
+        <li>&nbsp;&nbsp;gpt-5-nano</li>
+        <li>&nbsp;&nbsp;gpt-4.1</li>
+        <li>&nbsp;&nbsp;gpt-4o</li>
+        <li>&nbsp;&nbsp;o3</li>
+        <li>&nbsp;&nbsp;o4-mini</li>
+        <li><strong>Gemini 系列:</strong></li>
+        <li>&nbsp;&nbsp;gemini-2.5-pro</li>
+        <li>&nbsp;&nbsp;gemini-2.5-flash</li>
+        <li><strong>DeepSeek 系列:</strong></li>
+        <li>&nbsp;&nbsp;deepseek-v3.1</li>
+        <li>&nbsp;&nbsp;deepseek-r1</li>
+        <li><strong>其他模型:</strong></li>
+        <li>&nbsp;&nbsp;kimi-k2-instruct</li>
+        <li>&nbsp;&nbsp;grok-3</li>
+        <li>&nbsp;&nbsp;grok-3-mini</li>
+        <li>&nbsp;&nbsp;grok-4</li>
     </ul>
 
     <h2>🔧 故障排除</h2>
@@ -759,12 +783,40 @@ app.get('/v1/models', (req, res) => {
   res.json({
     object: 'list',
     data: [
+      // Claude 系列
       { id: 'claude-sonnet-4-20250514', object: 'model', created: 1677610602, owned_by: 'anthropic' },
       { id: 'claude-opus-4-1-20250805', object: 'model', created: 1677610602, owned_by: 'anthropic' },
       { id: 'claude-opus-4-20250514', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      { id: 'claude-3.5-sonnet', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      { id: 'claude-3.5-haiku', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      { id: 'claude-3.7-sonnet', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      { id: 'claude-4-sonnet', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      { id: 'claude-4-opus', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      { id: 'claude-4.1-opus', object: 'model', created: 1677610602, owned_by: 'anthropic' },
+      
+      // GPT 系列
       { id: 'gpt-5', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'gpt-5-codex', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'gpt-5-mini', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'gpt-5-nano', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'gpt-4.1', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'gpt-4o', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'o3', object: 'model', created: 1677610602, owned_by: 'openai' },
+      { id: 'o4-mini', object: 'model', created: 1677610602, owned_by: 'openai' },
+      
+      // Gemini 系列
       { id: 'gemini-2.5-pro', object: 'model', created: 1677610602, owned_by: 'google' },
-      { id: 'deepseek-v3.1', object: 'model', created: 1677610602, owned_by: 'deepseek' }
+      { id: 'gemini-2.5-flash', object: 'model', created: 1677610602, owned_by: 'google' },
+      
+      // DeepSeek 系列
+      { id: 'deepseek-v3.1', object: 'model', created: 1677610602, owned_by: 'deepseek' },
+      { id: 'deepseek-r1', object: 'model', created: 1677610602, owned_by: 'deepseek' },
+      
+      // 其他模型
+      { id: 'kimi-k2-instruct', object: 'model', created: 1677610602, owned_by: 'moonshot-ai' },
+      { id: 'grok-3', object: 'model', created: 1677610602, owned_by: 'xai' },
+      { id: 'grok-3-mini', object: 'model', created: 1677610602, owned_by: 'xai' },
+      { id: 'grok-4', object: 'model', created: 1677610602, owned_by: 'xai' }
     ]
   });
 });
