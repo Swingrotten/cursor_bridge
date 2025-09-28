@@ -403,6 +403,14 @@ app.post('/bridge/event', (req, res) => {
           requestData.started = true;
           requestData.rid = rid;
           isNonStream = true;
+          
+          // 清理非流式请求的开始超时
+          const timeouts = streamTimeouts.get(requestId) || {};
+          if (timeouts.startTimeout) {
+            clearTimeout(timeouts.startTimeout);
+            console.log(`⏰ 非流式请求已开始，清理开始超时: ${requestId}`);
+          }
+          
           console.log(`🚀 开始非流式响应: ${matchedRequestId} (Cursor RID: ${rid})`);
           break;
         }
@@ -432,8 +440,12 @@ app.post('/bridge/event', (req, res) => {
           // 也为Cursor的RID建立映射
           activeStreams.set(rid, streamRes);
 
-           // 设置流开始超时检测，同时启动delta超时检测
-           setupStreamStartTimeout(matchedRequestId);
+           // 流已开始，清理开始超时，启动delta超时检测
+           const timeouts = streamTimeouts.get(matchedRequestId) || {};
+           if (timeouts.startTimeout) {
+             clearTimeout(timeouts.startTimeout);
+             console.log(`⏰ 流已开始，清理开始超时: ${matchedRequestId}`);
+           }
            resetDeltaTimeout(matchedRequestId);
 
            console.log(`🚀 开始流式响应: ${matchedRequestId} (Cursor RID: ${rid})`);
@@ -714,6 +726,9 @@ app.post('/v1/chat/completions', async (req, res) => {
     // 存储这个请求，等待浏览器事件
     pendingRequests.set(requestId, { res, model, messages, timestamp: Date.now() });
 
+    // 设置流开始超时 - 在这里设置，确保在流开始前生效
+    setupStreamStartTimeout(requestId);
+
     // 发送初始响应
     res.write(`data: ${JSON.stringify({
       id: requestId,
@@ -734,7 +749,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     console.log(`📝 任务已加入队列: ${requestId}, 队列长度: ${browserQueue.length}`);
 
-    // 这个超时检查已经在meta事件中通过setupStreamStartTimeout处理
+    // 流开始超时已在上面设置
 
   } else {
     // 非流式响应 - 等待完整响应周期后一次性返回
@@ -751,6 +766,21 @@ app.post('/v1/chat/completions', async (req, res) => {
           started: false
         });
 
+        // 设置非流式请求开始超时
+        const startTimeout = setTimeout(() => {
+          if (nonStreamRequests.has(requestId)) {
+            const requestData = nonStreamRequests.get(requestId);
+            if (!requestData.started) {
+              nonStreamRequests.delete(requestId);
+              requestData.reject(new Error(`请求开始超时: ${REQUEST_START_TIMEOUT/1000}秒内未开始响应`));
+              console.log(`⏰ 非流式请求开始超时: ${requestId}`);
+            }
+          }
+        }, REQUEST_START_TIMEOUT);
+        
+        streamTimeouts.set(requestId, { startTimeout });
+        console.log(`⏰ 已设置非流式请求开始超时: ${requestId} (${REQUEST_START_TIMEOUT/1000}s)`);
+
         // 将任务加入浏览器队列
         browserQueue.push({
           type: 'send_message',
@@ -761,8 +791,6 @@ app.post('/v1/chat/completions', async (req, res) => {
         });
 
         console.log(`📝 非流式任务已加入队列: ${requestId}, 队列长度: ${browserQueue.length}`);
-        
-        // 非流式请求不设置超时，等待完整的响应周期
       });
 
       res.json(response);
